@@ -70,6 +70,17 @@ object Gems {
     private val work = listOf("mail", "gm", "calendar", "docs", "office", "sheets", "slides", "drive", "keep", "notes", "files", "documents", "teams", "zoom", "outlook")
     private val personal = listOf("music", "audiomack", "spotify", "photo", "gallery", "camera", "youtube", "video", "bible", "netflix")
 
+    /** "talk", "work", "personal" or "other" — used for gem colours and Matte folders. */
+    fun typeOf(pkg: String): String {
+        val p = pkg.lowercase()
+        return when {
+            talk.any { p.contains(it) } -> "talk"
+            work.any { p.contains(it) } -> "work"
+            personal.any { p.contains(it) } -> "personal"
+            else -> "other"
+        }
+    }
+
     /** Gem colour by app type: talk = emerald, work = sapphire, personal = amethyst, rest = onyx. */
     fun forPackage(pkg: String): Brush {
         val p = pkg.lowercase()

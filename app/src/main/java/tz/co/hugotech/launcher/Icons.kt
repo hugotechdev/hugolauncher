@@ -24,6 +24,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
@@ -63,7 +64,8 @@ fun AppIcon(
     theme: String,
     accent: Accent,
     badge: Int = 0,
-    dimmed: Boolean = false
+    dimmed: Boolean = false,
+    uniform: Boolean = false
 ) {
     Box(
         modifier = Modifier
@@ -111,7 +113,7 @@ fun AppIcon(
                     .border(0.5.dp, Color.White.copy(alpha = 0.10f), shape)
             )
         }
-        IconContent(app, iconSize, accent)
+        IconContent(app, iconSize, accent, uniform)
         if (badge > 0) {
             Box(
                 modifier = Modifier
@@ -135,7 +137,7 @@ fun AppIcon(
 }
 
 @Composable
-private fun IconContent(app: AppInfo?, iconSize: Dp, accent: Accent) {
+fun IconContent(app: AppInfo?, iconSize: Dp, accent: Accent, uniform: Boolean) {
     when {
         app == null -> Glyph(G.PLUS, iconSize * 0.4f, accent.soft)
         app.mono != null -> Image(
@@ -143,6 +145,14 @@ private fun IconContent(app: AppInfo?, iconSize: Dp, accent: Accent) {
             contentDescription = app.label,
             modifier = Modifier.size(iconSize * 0.62f),
             colorFilter = ColorFilter.tint(accent.soft)
+        )
+        uniform -> Image(
+            bitmap = app.icon,
+            contentDescription = app.label,
+            modifier = Modifier
+                .size(iconSize * 0.56f)
+                .clip(RoundedCornerShape(iconSize * 0.14f)),
+            colorFilter = tintToAccent(accent.soft)
         )
         else -> Image(
             bitmap = app.icon,
@@ -152,6 +162,23 @@ private fun IconContent(app: AppInfo?, iconSize: Dp, accent: Accent) {
                 .clip(RoundedCornerShape(iconSize * 0.14f))
         )
     }
+}
+
+/** Turns a full-colour icon into one colour (keeps light and dark). */
+fun tintToAccent(c: Color): ColorFilter {
+    val r = c.red
+    val g = c.green
+    val b = c.blue
+    return ColorFilter.colorMatrix(
+        ColorMatrix(
+            floatArrayOf(
+                0.299f * r, 0.587f * r, 0.114f * r, 0f, 0f,
+                0.299f * g, 0.587f * g, 0.114f * g, 0f, 0f,
+                0.299f * b, 0.587f * b, 0.114f * b, 0f, 0f,
+                0f, 0f, 0f, 1f, 0f
+            )
+        )
+    )
 }
 
 /** Background: charcoal with a faint golden spiral and stars. */

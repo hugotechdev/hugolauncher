@@ -42,11 +42,15 @@ fun SettingsScreen(
     theme: String,
     accent: Accent,
     showLabels: Boolean,
+    homeStyle: String,
+    uniform: Boolean,
     hidden: Set<String>,
     musicAccess: Boolean,
     onTheme: (String) -> Unit,
     onAccent: (String) -> Unit,
     onLabels: (Boolean) -> Unit,
+    onHomeStyle: (String) -> Unit,
+    onUniform: (Boolean) -> Unit,
     onUnhide: (String) -> Unit,
     onOpenMusicAccess: () -> Unit,
     onClose: () -> Unit
@@ -87,9 +91,25 @@ fun SettingsScreen(
             if (sample.isEmpty()) {
                 repeat(4) { AppIcon(null, 54.dp, theme, accent) }
             } else {
-                sample.forEach { AppIcon(it, 54.dp, theme, accent) }
+                sample.forEach { AppIcon(it, 54.dp, theme, accent, uniform = uniform) }
             }
         }
+
+        Section("Home style")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Option("Classic", homeStyle == "classic", accent, Modifier.weight(1f)) { onHomeStyle("classic") }
+            Option("Matte", homeStyle == "matte", accent, Modifier.weight(1f)) { onHomeStyle("matte") }
+            Option("Split 3D", homeStyle == "split", accent, Modifier.weight(1f)) { onHomeStyle("split") }
+        }
+        Text(
+            when (homeStyle) {
+                "matte" -> "Month calendar, folders, search pill and dock — clean matte look."
+                "split" -> "Widgets on the left, apps on the right that bend in 3D as you scroll, spinning record player."
+                else -> "Verse of the day, today’s tasks and Audiomack, one under the other."
+            },
+            color = HC.Muted,
+            fontSize = 12.sp
+        )
 
         Section("Icon theme")
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -115,6 +135,23 @@ fun SettingsScreen(
             Switch(
                 checked = showLabels,
                 onCheckedChange = onLabels,
+                colors = SwitchDefaults.colors(checkedTrackColor = accent.main, checkedThumbColor = HC.Bg)
+            )
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .card()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("${accent.label} icons", color = HC.Text, fontSize = 15.sp)
+                Text("Paint every app icon in one colour so they all match", color = HC.Muted, fontSize = 12.sp)
+            }
+            Switch(
+                checked = uniform,
+                onCheckedChange = onUniform,
                 colors = SwitchDefaults.colors(checkedTrackColor = accent.main, checkedThumbColor = HC.Bg)
             )
         }
@@ -156,7 +193,7 @@ fun SettingsScreen(
         }
 
         Text(
-            "HUGO Smart Launcher · v1.0 · HUGO TECH",
+            "HUGO Smart Launcher · v1.1 · HUGO TECH",
             color = HC.Dim,
             fontSize = 12.sp,
             modifier = Modifier.padding(top = 8.dp, bottom = 24.dp)

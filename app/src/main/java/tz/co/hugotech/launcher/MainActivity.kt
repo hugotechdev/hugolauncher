@@ -97,6 +97,8 @@ fun LauncherApp(screenState: MutableState<Screen>, reloadKey: Int) {
     var theme by remember { mutableStateOf(prefs.iconTheme) }
     var accentId by remember { mutableStateOf(prefs.accent) }
     var showLabels by remember { mutableStateOf(prefs.showLabels) }
+    var homeStyle by remember { mutableStateOf(prefs.homeStyle) }
+    var uniform by remember { mutableStateOf(prefs.uniformIcons) }
     var hidden by remember { mutableStateOf(prefs.hidden()) }
     val accent = accentOf(accentId)
     val apps = remember(allApps, hidden) { allApps.filter { it.pkg !in hidden } }
@@ -143,18 +145,24 @@ fun LauncherApp(screenState: MutableState<Screen>, reloadKey: Int) {
     ) {
         Box(Modifier.fillMaxSize().background(HC.Bg)) {
             GoldenWallpaper(accent)
-            HomeScreen(
+            val args = HomeArgs(
                 apps = apps,
                 prefs = prefs,
                 music = music,
                 musicAccess = musicAccess,
                 accent = accent,
                 theme = theme,
+                uniform = uniform,
                 badges = badges,
                 onOpenDrawer = { screen = Screen.Drawer },
                 onOpenSettings = { screen = Screen.Settings },
                 onLaunch = launch
             )
+            when (homeStyle) {
+                "matte" -> MatteHome(args)
+                "split" -> SplitHome(args)
+                else -> ClassicHome(args)
+            }
             AnimatedVisibility(
                 visible = screen == Screen.Drawer,
                 enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -166,6 +174,7 @@ fun LauncherApp(screenState: MutableState<Screen>, reloadKey: Int) {
                     theme = theme,
                     accent = accent,
                     showLabels = showLabels,
+                    uniform = uniform,
                     badges = badges,
                     onLaunch = launch,
                     onClose = { screen = Screen.Home },
@@ -187,11 +196,15 @@ fun LauncherApp(screenState: MutableState<Screen>, reloadKey: Int) {
                     theme = theme,
                     accent = accent,
                     showLabels = showLabels,
+                    homeStyle = homeStyle,
+                    uniform = uniform,
                     hidden = hidden,
                     musicAccess = musicAccess,
                     onTheme = { theme = it; prefs.iconTheme = it },
                     onAccent = { accentId = it; prefs.accent = it },
                     onLabels = { showLabels = it; prefs.showLabels = it },
+                    onHomeStyle = { homeStyle = it; prefs.homeStyle = it },
+                    onUniform = { uniform = it; prefs.uniformIcons = it },
                     onUnhide = { pkg ->
                         hidden = hidden - pkg
                         prefs.setHidden(hidden)

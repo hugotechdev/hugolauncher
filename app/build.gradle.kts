@@ -12,8 +12,18 @@ android {
         applicationId = "tz.co.hugotech.launcher"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
+    }
+
+    // Fixed key so every new APK installs over the old one (no uninstall needed).
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("hugo-debug.jks")
+            storePassword = "hugotech"
+            keyAlias = "hugo"
+            keyPassword = "hugotech"
+        }
     }
 
     buildTypes {

@@ -49,6 +49,14 @@ class Prefs(context: Context) {
         get() = sp.getString("accent", "gold") ?: "gold"
         set(v) { sp.edit().putString("accent", v).apply() }
 
+    var homeStyle: String
+        get() = sp.getString("home_style", "classic") ?: "classic"
+        set(v) { sp.edit().putString("home_style", v).apply() }
+
+    var uniformIcons: Boolean
+        get() = sp.getBoolean("uniform_icons", false)
+        set(v) { sp.edit().putBoolean("uniform_icons", v).apply() }
+
     var showLabels: Boolean
         get() = sp.getBoolean("show_labels", true)
         set(v) { sp.edit().putBoolean("show_labels", v).apply() }

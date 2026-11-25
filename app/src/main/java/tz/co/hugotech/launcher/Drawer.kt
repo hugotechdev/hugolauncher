@@ -76,6 +76,7 @@ fun DrawerScreen(
     theme: String,
     accent: Accent,
     showLabels: Boolean,
+    uniform: Boolean,
     badges: Map<String, Int>,
     onLaunch: (AppInfo) -> Unit,
     onClose: () -> Unit,
@@ -150,13 +151,13 @@ fun DrawerScreen(
                 modifier = Modifier.weight(1f)
             ) {
                 items(results.size) { i ->
-                    DrawerItem(results[i], theme, accent, showLabels, badges[results[i].pkg] ?: 0, false, onLaunch, onHide)
+                    DrawerItem(results[i], theme, accent, showLabels, badges[results[i].pkg] ?: 0, false, uniform, onLaunch, onHide)
                 }
             }
         } else {
-            Ring3D(frequent, theme, accent, onLaunch)
+            Ring3D(frequent, theme, accent, uniform, onLaunch)
             Box(Modifier.weight(1f)) {
-                Grid3D(active, rare, theme, accent, showLabels, badges, onLaunch, onHide)
+                Grid3D(active, rare, theme, accent, showLabels, uniform, badges, onLaunch, onHide)
             }
         }
     }
@@ -176,7 +177,7 @@ private fun HeaderButton(path: String, accent: Accent, onClick: () -> Unit) {
 
 /** Favourite apps on a spinning 3D ring. Drag left/right to turn it. */
 @Composable
-private fun Ring3D(apps: List<AppInfo>, theme: String, accent: Accent, onLaunch: (AppInfo) -> Unit) {
+private fun Ring3D(apps: List<AppInfo>, theme: String, accent: Accent, uniform: Boolean, onLaunch: (AppInfo) -> Unit) {
     if (apps.isEmpty()) return
     val n = apps.size
     val step = 360f / n
@@ -235,7 +236,7 @@ private fun Ring3D(apps: List<AppInfo>, theme: String, accent: Accent, onLaunch:
                             }
                         }
                 ) {
-                    AppIcon(app, 66.dp, theme, accent)
+                    AppIcon(app, 66.dp, theme, accent, uniform = uniform)
                 }
             }
         }
@@ -252,6 +253,7 @@ private fun Grid3D(
     theme: String,
     accent: Accent,
     showLabels: Boolean,
+    uniform: Boolean,
     badges: Map<String, Int>,
     onLaunch: (AppInfo) -> Unit,
     onHide: (AppInfo) -> Unit
@@ -303,7 +305,7 @@ private fun Grid3D(
                         }
                     }
                 ) {
-                    DrawerItem(e.app, theme, accent, showLabels, badges[e.app.pkg] ?: 0, e.rare, onLaunch, onHide)
+                    DrawerItem(e.app, theme, accent, showLabels, badges[e.app.pkg] ?: 0, e.rare, uniform, onLaunch, onHide)
                 }
             }
         }
@@ -319,6 +321,7 @@ private fun DrawerItem(
     showLabels: Boolean,
     badge: Int,
     dimmed: Boolean,
+    uniform: Boolean,
     onLaunch: (AppInfo) -> Unit,
     onHide: (AppInfo) -> Unit
 ) {
@@ -331,7 +334,7 @@ private fun DrawerItem(
                 .combinedClickable(onClick = { onLaunch(app) }, onLongClick = { menu = true }),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            AppIcon(app, 58.dp, theme, accent, badge, dimmed)
+            AppIcon(app, 58.dp, theme, accent, badge, dimmed, uniform)
             if (showLabels) {
                 Text(
                     app.label,
