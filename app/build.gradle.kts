@@ -12,13 +12,13 @@ android {
         applicationId = "tz.co.hugotech.launcher"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 4
+        versionName = "2.0"
     }
 
-    // Fixed key so every new APK installs over the old one (no uninstall needed).
+    // One fixed key for every build, so new APKs install over the old one.
     signingConfigs {
-        getByName("debug") {
+        create("hugo") {
             storeFile = file("hugo-debug.jks")
             storePassword = "hugotech"
             keyAlias = "hugo"
@@ -27,8 +27,15 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("hugo")
+        }
         release {
-            isMinifyEnabled = false
+            // Release = optimized and much faster than debug.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("hugo")
         }
     }
     compileOptions {
@@ -40,6 +47,10 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
     }
 }
 
@@ -53,4 +64,6 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
+    implementation("androidx.fragment:fragment-ktx:1.8.3")
+    implementation("androidx.biometric:biometric:1.1.0")
 }

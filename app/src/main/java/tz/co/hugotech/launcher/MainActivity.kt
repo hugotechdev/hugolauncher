@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -16,12 +16,16 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -31,19 +35,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-enum class Screen { Home, Drawer, Settings }
-
-class MainActivity : ComponentActivity() {
-    private val screen = mutableStateOf(Screen.Home)
+/** home · drawer · drawer-search · panel · settings:<page> */
+class MainActivity : FragmentActivity() {
+    private lateinit var state: LauncherState
+    private val screen = mutableStateOf("home")
     private val reloadKey = mutableIntStateOf(0)
 
     private val packageReceiver = object : BroadcastReceiver() {
@@ -55,6 +59,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        state = LauncherState(applicationContext)
+        state.activity = this
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_PACKAGE_ADDED)
             addAction(Intent.ACTION_PACKAGE_REMOVED)
@@ -62,9 +68,17 @@ class MainActivity : ComponentActivity() {
             addDataScheme("package")
         }
         ContextCompat.registerReceiver(this, packageReceiver, filter, ContextCompat.RECEIVER_EXPORTED)
-        setContent {
-            LauncherApp(screen, reloadKey.intValue)
-        }
+        setContent { LauncherApp(state, screen, reloadKey.intValue) }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        state.widgetHost.start()
+    }
+
+    override fun onStop() {
+        state.widgetHost.stop()
+        super.onStop()
     }
 
     override fun onDestroy() {
@@ -78,146 +92,139 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // Pressing Home always brings you back to the home screen.
-        screen.value = Screen.Home
+        screen.value = "home"
     }
 }
 
 @Composable
-fun LauncherApp(screenState: MutableState<Screen>, reloadKey: Int) {
-    val context = LocalContext.current
-    val prefs = remember { Prefs(context) }
+fun LauncherApp(s: LauncherState, screenState: MutableState<String>, reloadKey: Int) {
     var screen by screenState
-
-    var allApps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
-    LaunchedEffect(reloadKey) {
-        allApps = withContext(Dispatchers.Default) { AppRepository.loadApps(context) }
+    val nav = remember {
+        Nav(
+            drawer = { search -> screenState.value = if (search) "drawer-search" else "drawer" },
+            panel = { screenState.value = "panel" },
+            settings = { page -> screenState.value = "settings:$page" }
+        )
     }
 
-    var theme by remember { mutableStateOf(prefs.iconTheme) }
-    var accentId by remember { mutableStateOf(prefs.accent) }
-    var showLabels by remember { mutableStateOf(prefs.showLabels) }
-    var homeStyle by remember { mutableStateOf(prefs.homeStyle) }
-    var uniform by remember { mutableStateOf(prefs.uniformIcons) }
-    var hidden by remember { mutableStateOf(prefs.hidden()) }
-    val accent = accentOf(accentId)
-    val apps = remember(allApps, hidden) { allApps.filter { it.pkg !in hidden } }
+    // Load apps (cached list shows at once; this refreshes it)
+    LaunchedEffect(reloadKey) {
+        if (reloadKey > 0) {
+            delay(1500)
+            IconCache.clear()
+            s.iconVersion.intValue++
+        }
+        s.apps.value = withContext(Dispatchers.Default) { AppRepository.load(s) }
+    }
 
-    val music = remember { MusicController(context) }
-    var musicAccess by remember { mutableStateOf(music.hasAccess()) }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
+    // Music + live checks while the launcher is in front
+    val owner = LocalLifecycleOwner.current
+    var resumes by remember { mutableIntStateOf(0) }
+    DisposableEffect(owner) {
+        val obs = LifecycleEventObserver { _, e ->
+            when (e) {
                 Lifecycle.Event.ON_RESUME -> {
-                    musicAccess = music.hasAccess()
-                    music.start()
+                    s.music.start()
+                    resumes++
                 }
-                Lifecycle.Event.ON_PAUSE -> music.stop()
+                Lifecycle.Event.ON_PAUSE -> s.music.stop()
                 else -> {}
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
+        owner.lifecycle.addObserver(obs)
         onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            music.stop()
+            owner.lifecycle.removeObserver(obs)
+            s.music.stop()
         }
     }
-    val badges = NotificationState.counts.value
 
-    val launch: (AppInfo) -> Unit = { app ->
-        prefs.recordLaunch(app.pkg)
-        AppRepository.launch(context, app)
-        screen = Screen.Home
+    // Phone mode side effects (do not disturb in Worship)
+    val now = rememberNow()
+    val mode = remember(now / 300_000L, resumes, s.phoneMode.value, s.autoMode.value) { s.effectiveMode() }
+    var lastMode by remember { mutableStateOf("") }
+    LaunchedEffect(mode) {
+        if (s.modeChangesLook.value && Controls.dndAccess(s.context)) {
+            if (mode == "worship") Controls.setDnd(s.context, true)
+            else if (lastMode == "worship") Controls.setDnd(s.context, false)
+        }
+        lastMode = mode
     }
 
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            primary = accent.main,
-            onPrimary = HC.Bg,
-            surface = Color(0xFF1C1B1E),
-            onSurface = HC.Text,
-            surfaceContainer = Color(0xFF1C1B1E),
-            surfaceContainerHigh = Color(0xFF232226),
-            background = HC.Bg,
-            onBackground = HC.Text
-        )
-    ) {
-        Box(Modifier.fillMaxSize().background(HC.Bg)) {
-            GoldenWallpaper(accent)
-            val args = HomeArgs(
-                apps = apps,
-                prefs = prefs,
-                music = music,
-                musicAccess = musicAccess,
-                accent = accent,
-                theme = theme,
-                uniform = uniform,
-                badges = badges,
-                onOpenDrawer = { screen = Screen.Drawer },
-                onOpenSettings = { screen = Screen.Settings },
-                onLaunch = launch
-            )
-            when (homeStyle) {
-                "matte" -> MatteHome(args)
-                "split" -> SplitHome(args)
-                else -> ClassicHome(args)
+    // Short messages
+    val msg = s.toast.value
+    LaunchedEffect(msg) {
+        if (msg != null) {
+            Toast.makeText(s.context, msg, Toast.LENGTH_LONG).show()
+            s.toast.value = null
+        }
+    }
+
+    val mono = s.homeStyle.value == "mono"
+    val pal = if (mono) LightPal else DarkPal
+    val a = accentOf(s.accent.value)
+    val scheme = if (mono) {
+        lightColorScheme(primary = a.main, onPrimary = pal.cardSolid, surface = pal.cardSolid, onSurface = pal.text, background = pal.bg, onBackground = pal.text, surfaceContainerHigh = pal.cardSolid)
+    } else {
+        darkColorScheme(primary = a.main, onPrimary = pal.bg, surface = pal.cardSolid, onSurface = pal.text, background = pal.bg, onBackground = pal.text, surfaceContainerHigh = pal.cardSolid)
+    }
+
+    CompositionLocalProvider(LocalLauncher provides s, LocalNav provides nav, LocalPal provides pal) {
+        MaterialTheme(colorScheme = scheme) {
+            Box(Modifier.fillMaxSize()) {
+                HomeRoot()
+                AnimatedVisibility(
+                    visible = screen.startsWith("drawer"),
+                    enter = slideInVertically(initialOffsetY = { it / 3 }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it / 3 }) + fadeOut()
+                ) { DrawerScreen(focusSearch = screen == "drawer-search") { screen = "home" } }
+                AnimatedVisibility(
+                    visible = screen == "panel",
+                    enter = slideInVertically(initialOffsetY = { -it / 3 }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { -it / 3 }) + fadeOut()
+                ) { QuickPanel { screen = "home" } }
+                AnimatedVisibility(
+                    visible = screen.startsWith("settings"),
+                    enter = slideInHorizontally(initialOffsetX = { it / 3 }) + fadeIn(),
+                    exit = slideOutHorizontally(targetOffsetX = { it / 3 }) + fadeOut()
+                ) {
+                    SettingsScreen(
+                        page = screen.substringAfter("settings:", "main"),
+                        onPage = { screen = "settings:$it" },
+                        onClose = { screen = "home" }
+                    )
+                }
             }
-            AnimatedVisibility(
-                visible = screen == Screen.Drawer,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-            ) {
-                DrawerScreen(
-                    apps = apps,
-                    prefs = prefs,
-                    theme = theme,
-                    accent = accent,
-                    showLabels = showLabels,
-                    uniform = uniform,
-                    badges = badges,
-                    onLaunch = launch,
-                    onClose = { screen = Screen.Home },
-                    onSettings = { screen = Screen.Settings },
-                    onHide = { app ->
-                        hidden = hidden + app.pkg
-                        prefs.setHidden(hidden)
+
+            s.pendingLimit.value?.let { app ->
+                val used = Usage.todayMinutes(s.context)[app.pkg] ?: 0
+                AlertDialog(
+                    onDismissRequest = { s.pendingLimit.value = null },
+                    title = { Text(s.tr("Time limit reached", "Muda umefika")) },
+                    text = {
+                        Text(
+                            s.tr(
+                                "You've used ${app.label} for $used minutes today. Your limit is ${s.limits.value[app.pkg]} minutes.",
+                                "Umetumia ${app.label} dakika $used leo. Kikomo chako ni dakika ${s.limits.value[app.pkg]}."
+                            )
+                        )
+                    },
+                    confirmButton = { TextButton(onClick = { s.pendingLimit.value = null }) { Text(s.tr("Not now", "Sasa hapana")) } },
+                    dismissButton = {
+                        TextButton(onClick = {
+                            s.pendingLimit.value = null
+                            AppRepository.open(s, app, skipLimit = true)
+                        }) { Text(s.tr("Open anyway", "Fungua tu")) }
                     }
                 )
             }
-            AnimatedVisibility(
-                visible = screen == Screen.Settings,
-                enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
-                exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
-            ) {
-                SettingsScreen(
-                    apps = apps,
-                    allApps = allApps,
-                    theme = theme,
-                    accent = accent,
-                    showLabels = showLabels,
-                    homeStyle = homeStyle,
-                    uniform = uniform,
-                    hidden = hidden,
-                    musicAccess = musicAccess,
-                    onTheme = { theme = it; prefs.iconTheme = it },
-                    onAccent = { accentId = it; prefs.accent = it },
-                    onLabels = { showLabels = it; prefs.showLabels = it },
-                    onHomeStyle = { homeStyle = it; prefs.homeStyle = it },
-                    onUniform = { uniform = it; prefs.uniformIcons = it },
-                    onUnhide = { pkg ->
-                        hidden = hidden - pkg
-                        prefs.setHidden(hidden)
-                    },
-                    onOpenMusicAccess = { music.openAccessSettings() },
-                    onClose = { screen = Screen.Home }
-                )
-            }
         }
     }
 
-    // Back goes to Home; on Home it does nothing (a launcher never closes).
+    // Back always returns to Home; on Home it does nothing.
     BackHandler(enabled = true) {
-        if (screen != Screen.Home) screen = Screen.Home
+        screen = when {
+            screen.startsWith("settings:") && screen != "settings:main" -> "settings:main"
+            else -> "home"
+        }
     }
 }

@@ -1,14 +1,12 @@
 package tz.co.hugotech.launcher
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,24 +16,27 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,74 +45,82 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.roundToInt
-import kotlin.math.sin
+import kotlinx.coroutines.withContext
 
-private sealed class Entry {
-    data class Header(val title: String) : Entry()
-    data class App(val app: AppInfo, val rare: Boolean) : Entry()
+private sealed class Cell {
+    data class Header(val title: String) : Cell()
+    data class App(val app: AppInfo, val rare: Boolean) : Cell()
 }
 
+/** All apps: search, ask AI, a clean grid, and rarely used apps at the bottom. */
 @Composable
-fun DrawerScreen(
-    apps: List<AppInfo>,
-    prefs: Prefs,
-    theme: String,
-    accent: Accent,
-    showLabels: Boolean,
-    uniform: Boolean,
-    badges: Map<String, Int>,
-    onLaunch: (AppInfo) -> Unit,
-    onClose: () -> Unit,
-    onSettings: () -> Unit,
-    onHide: (AppInfo) -> Unit
-) {
+fun DrawerScreen(focusSearch: Boolean, onClose: () -> Unit) {
+    val s = LocalLauncher.current
+    val pal = LocalPal.current
+    val a = accent()
+    val nav = LocalNav.current
     var query by remember { mutableStateOf("") }
-    val fourteenDays = 14L * 24 * 3600 * 1000
-    val split = remember(apps) {
-        val now = System.currentTimeMillis()
-        apps.partition { a ->
-            val last = prefs.lastLaunch(a.pkg)
-            if (last == 0L) now - prefs.installedAt > fourteenDays else now - last > fourteenDays
+    var menu by remember { mutableStateOf<AppInfo?>(null) }
+    var asking by remember { mutableStateOf<String?>(null) }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(focusSearch) {
+        if (focusSearch) {
+            try {
+                focus.requestFocus()
+            } catch (e: Exception) {
+                // not attached yet
+            }
         }
     }
-    val rare = split.first
-    val active = split.second
-    val frequent = remember(apps) {
-        val used = apps.filter { prefs.launchCount(it.pkg) > 0 }.sortedByDescending { prefs.launchCount(it.pkg) }
-        (used + apps.filter { it !in used }).take(10)
+    val apps = s.visibleApps()
+    val results = if (query.isBlank()) emptyList() else apps.filter { it.label.contains(query.trim(), true) }
+    val cells = remember(apps, query) {
+        if (query.isNotBlank()) {
+            results.map { Cell.App(it, false) }
+        } else {
+            val now = System.currentTimeMillis()
+            val fortnight = 14L * 86_400_000L
+            val (rare, active) = apps.partition { app ->
+                val last = s.lastLaunch(app.pkg)
+                if (last == 0L) now - s.installedAt > fortnight else now - last > fortnight
+            }
+            buildList<Cell> {
+                active.forEach { add(Cell.App(it, false)) }
+                if (rare.isNotEmpty()) {
+                    add(Cell.Header(s.tr("Rarely used · not opened in 14 days", "Hazitumiki sana · hazijafunguliwa siku 14")))
+                    rare.forEach { add(Cell.App(it, true)) }
+                }
+            }
+        }
     }
+    val badges = NotificationState.counts.value
 
     Column(
         Modifier
             .fillMaxSize()
-            .background(HC.Bg)
+            .background(pal.bg)
             .statusBarsPadding()
             .navigationBarsPadding()
             .padding(horizontal = 16.dp)
     ) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("All apps", color = HC.Text, fontSize = 26.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-            HeaderButton(G.SETTINGS, accent, onSettings)
+            Text(tr("All apps", "Apps zote"), color = pal.text, fontSize = 24.sp, fontWeight = FontWeight.Light, modifier = Modifier.weight(1f))
+            IconButtonSoft(G.SETTINGS) { nav.settings("main") }
             Spacer(Modifier.width(8.dp))
-            HeaderButton(G.DOWN, accent, onClose)
+            IconButtonSoft(G.DOWN) { onClose() }
         }
         Spacer(Modifier.height(12.dp))
         Row(
@@ -119,247 +128,244 @@ fun DrawerScreen(
                 .fillMaxWidth()
                 .height(50.dp)
                 .clip(RoundedCornerShape(25.dp))
-                .background(Color.White.copy(alpha = 0.06f))
-                .border(1.dp, accent.main.copy(alpha = 0.3f), RoundedCornerShape(25.dp))
+                .background(pal.cardSolid)
+                .border(1.dp, pal.border, RoundedCornerShape(25.dp))
                 .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Glyph(G.SEARCH, 20.dp, accent.main)
+            Glyph(G.SEARCH, 18.dp, pal.muted)
             Spacer(Modifier.width(10.dp))
             Box(Modifier.weight(1f)) {
-                if (query.isEmpty()) Text("Search apps…", color = HC.Muted, fontSize = 15.sp)
-                val results = apps.filter { it.label.contains(query.trim(), ignoreCase = true) }
+                if (query.isEmpty()) Text(tr("Search apps or ask…", "Tafuta app au uliza…"), color = pal.dim, fontSize = 15.sp)
                 BasicTextField(
                     value = query,
                     onValueChange = { query = it },
                     singleLine = true,
-                    textStyle = TextStyle(color = HC.Text, fontSize = 15.sp),
-                    cursorBrush = SolidColor(accent.main),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                    keyboardActions = KeyboardActions(onGo = { results.firstOrNull()?.let(onLaunch) }),
-                    modifier = Modifier.fillMaxWidth()
+                    textStyle = TextStyle(color = pal.text, fontSize = 15.sp),
+                    cursorBrush = SolidColor(a.main),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go, keyboardType = KeyboardType.Text),
+                    keyboardActions = KeyboardActions(onGo = {
+                        val first = results.firstOrNull()
+                        if (first != null) AppRepository.open(s, first) else if (query.isNotBlank()) asking = query
+                    }),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus)
                 )
             }
-        }
-
-        if (query.isNotBlank()) {
-            val results = apps.filter { it.label.contains(query.trim(), ignoreCase = true) }
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
-                contentPadding = PaddingValues(vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                items(results.size) { i ->
-                    DrawerItem(results[i], theme, accent, showLabels, badges[results[i].pkg] ?: 0, false, uniform, onLaunch, onHide)
-                }
-            }
-        } else {
-            Ring3D(frequent, theme, accent, uniform, onLaunch)
-            Box(Modifier.weight(1f)) {
-                Grid3D(active, rare, theme, accent, showLabels, uniform, badges, onLaunch, onHide)
+            if (query.isNotEmpty()) {
+                Spacer(Modifier.width(8.dp))
+                TextLink(tr("Ask AI", "Uliza AI")) { asking = query }
             }
         }
-    }
-}
 
-@Composable
-private fun HeaderButton(path: String, accent: Accent, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .size(44.dp)
-            .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.07f))
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center
-    ) { Glyph(path, 18.dp, accent.soft) }
-}
-
-/** Favourite apps on a spinning 3D ring. Drag left/right to turn it. */
-@Composable
-private fun Ring3D(apps: List<AppInfo>, theme: String, accent: Accent, uniform: Boolean, onLaunch: (AppInfo) -> Unit) {
-    if (apps.isEmpty()) return
-    val n = apps.size
-    val step = 360f / n
-    val rot = remember { Animatable(0f) }
-    val scope = rememberCoroutineScope()
-    val radius = with(LocalDensity.current) { 118.dp.toPx() }
-    val front = ((((-rot.value / step).roundToInt()) % n) + n) % n
-
-    Column(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(150.dp)
-                .pointerInput(n) {
-                    detectHorizontalDragGestures(
-                        onDragEnd = {
-                            scope.launch {
-                                val target = (rot.value / step).roundToInt() * step
-                                rot.animateTo(target, spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow))
-                            }
-                        }
-                    ) { change, drag ->
-                        change.consume()
-                        scope.launch { rot.snapTo(rot.value + drag * 0.35f) }
-                    }
-                },
-            contentAlignment = Alignment.Center
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(s.columns.value),
+            contentPadding = PaddingValues(top = 18.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+            modifier = Modifier.weight(1f)
         ) {
-            apps.forEachIndexed { i, app ->
-                val deg = i * step + rot.value
-                val rad = Math.toRadians(deg.toDouble())
-                val x = (sin(rad) * radius).toFloat()
-                val z = cos(rad).toFloat()
-                val depth = (z + 1f) / 2f
-                Box(
-                    Modifier
-                        .zIndex(z)
-                        .graphicsLayer {
-                            translationX = x
-                            translationY = z * 16.dp.toPx()
-                            val s = 0.55f + 0.45f * depth
-                            scaleX = s
-                            scaleY = s
-                            alpha = 0.25f + 0.75f * depth
-                            rotationY = -sin(rad).toFloat() * 35f
-                            cameraDistance = 12f * density
-                        }
-                        .clickable {
-                            if (i == front) {
-                                onLaunch(app)
-                            } else {
-                                scope.launch {
-                                    val delta = (((-i * step - rot.value) % 360f) + 540f) % 360f - 180f
-                                    rot.animateTo(rot.value + delta, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessLow))
-                                }
-                            }
-                        }
-                ) {
-                    AppIcon(app, 66.dp, theme, accent, uniform = uniform)
+            items(
+                count = cells.size,
+                span = { i -> if (cells[i] is Cell.Header) GridItemSpan(maxLineSpan) else GridItemSpan(1) }
+            ) { i ->
+                when (val c = cells[i]) {
+                    is Cell.Header -> Text(c.title, color = pal.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp, start = 4.dp))
+                    is Cell.App -> DrawerItem(c.app, badges[c.app.pkg] ?: 0, c.rare) { menu = c.app }
+                }
+            }
+            if (query.isNotBlank() && results.isEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Text(
+                        tr("No app found. Press “Ask AI” to ask the assistant.", "Hakuna app. Bonyeza “Uliza AI” kumuuliza msaidizi."),
+                        color = pal.muted, fontSize = 13.sp, modifier = Modifier.padding(4.dp)
+                    )
                 }
             }
         }
-        Text(apps[front].label, color = HC.VerseGold, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-        Text("Tap to open · drag to spin", color = HC.Muted, fontSize = 11.sp)
     }
-}
 
-/** All apps in a grid that bends in 3D as you scroll. */
-@Composable
-private fun Grid3D(
-    active: List<AppInfo>,
-    rare: List<AppInfo>,
-    theme: String,
-    accent: Accent,
-    showLabels: Boolean,
-    uniform: Boolean,
-    badges: Map<String, Int>,
-    onLaunch: (AppInfo) -> Unit,
-    onHide: (AppInfo) -> Unit
-) {
-    val entries = remember(active, rare) {
-        buildList<Entry> {
-            add(Entry.Header("All apps · ${active.size}"))
-            active.forEach { add(Entry.App(it, false)) }
-            if (rare.isNotEmpty()) {
-                add(Entry.Header("Rarely used · not opened in 14 days"))
-                rare.forEach { add(Entry.App(it, true)) }
-            }
-        }
-    }
-    val state = rememberLazyGridState()
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(4),
-        state = state,
-        contentPadding = PaddingValues(top = 10.dp, bottom = 40.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        items(
-            count = entries.size,
-            span = { i -> if (entries[i] is Entry.Header) GridItemSpan(maxLineSpan) else GridItemSpan(1) }
-        ) { i ->
-            when (val e = entries[i]) {
-                is Entry.Header -> Text(
-                    e.title,
-                    color = accent.soft,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(top = 8.dp, start = 4.dp)
-                )
-                is Entry.App -> Box(
-                    Modifier.graphicsLayer {
-                        val info = state.layoutInfo
-                        val item = info.visibleItemsInfo.firstOrNull { it.index == i }
-                        if (item != null) {
-                            val vpH = (info.viewportEndOffset - info.viewportStartOffset).toFloat()
-                            val center = item.offset.y + item.size.height / 2f - info.viewportStartOffset
-                            val k = ((center - vpH / 2f) / (vpH / 2f)).coerceIn(-1f, 1f)
-                            rotationX = -k * 48f
-                            val s = 1f - abs(k) * 0.2f
-                            scaleX = s
-                            scaleY = s
-                            alpha = 1f - abs(k) * 0.55f
-                            cameraDistance = 10f * density
-                        }
-                    }
-                ) {
-                    DrawerItem(e.app, theme, accent, showLabels, badges[e.app.pkg] ?: 0, e.rare, uniform, onLaunch, onHide)
-                }
-            }
-        }
-    }
+    menu?.let { app -> AppMenu(app) { menu = null } }
+    asking?.let { q -> AskDialog(q) { asking = null } }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DrawerItem(
-    app: AppInfo,
-    theme: String,
-    accent: Accent,
-    showLabels: Boolean,
-    badge: Int,
-    dimmed: Boolean,
-    uniform: Boolean,
-    onLaunch: (AppInfo) -> Unit,
-    onHide: (AppInfo) -> Unit
-) {
-    val context = LocalContext.current
-    var menu by remember { mutableStateOf(false) }
-    Box {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .combinedClickable(onClick = { onLaunch(app) }, onLongClick = { menu = true }),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            AppIcon(app, 58.dp, theme, accent, badge, dimmed, uniform)
-            if (showLabels) {
-                Text(
-                    app.label,
-                    color = if (dimmed) HC.Dim else Color(0xFFE7E5E4),
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = 6.dp, start = 2.dp, end = 2.dp)
-                )
-            }
-        }
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(text = { Text("App info") }, onClick = {
-                menu = false
-                AppRepository.openInfo(context, app.pkg)
-            })
-            DropdownMenuItem(text = { Text("Hide app") }, onClick = {
-                menu = false
-                onHide(app)
-            })
-            DropdownMenuItem(text = { Text("Uninstall") }, onClick = {
-                menu = false
-                AppRepository.uninstall(context, app.pkg)
-            })
+private fun DrawerItem(app: AppInfo, badge: Int, dimmed: Boolean, onMenu: () -> Unit) {
+    val s = LocalLauncher.current
+    val pal = LocalPal.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .combinedClickable(onClick = { AppRepository.open(s, app) }, onLongClick = onMenu)
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        AppIcon(app, 54.dp, badge, dimmed)
+        if (s.showLabels.value) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                app.label,
+                color = if (dimmed) pal.dim else pal.text,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(max = 80.dp)
+            )
         }
     }
 }
+
+/** Everything you can do with one app. */
+@Composable
+fun AppMenu(app: AppInfo, startPage: String = "main", onClose: () -> Unit) {
+    val s = LocalLauncher.current
+    var page by remember { mutableStateOf(startPage) }
+    val pickIcon = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null && !IconCache.saveCustom(s, app, uri)) s.toast.value = s.tr("Couldn't use that picture", "Picha hiyo haikufaa")
+        onClose()
+    }
+    val onHome = s.home.value.contains("app:" + app.key)
+    val locked = app.key in s.locked.value
+    val workHidden = app.pkg in s.workHidden.value
+
+    when (page) {
+        "rename" -> {
+            var name by remember { mutableStateOf(app.label) }
+            AlertDialog(
+                onDismissRequest = onClose,
+                title = { Text(tr("Rename", "Badilisha jina")) },
+                text = { OutlinedTextField(name, { name = it }, singleLine = true) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        s.renamed.put(app.key, name.trim().ifBlank { null }?.takeIf { it != app.realLabel })
+                        s.apps.value = s.apps.value.map { if (it.key == app.key) it.copy(label = name.trim().ifBlank { app.realLabel }) else it }
+                        onClose()
+                    }) { Text(tr("Save", "Hifadhi")) }
+                },
+                dismissButton = { TextButton(onClick = onClose) { Text(tr("Cancel", "Ghairi")) } }
+            )
+        }
+        "limit" -> {
+            var minutes by remember { mutableStateOf(s.limits.value[app.pkg] ?: "") }
+            AlertDialog(
+                onDismissRequest = onClose,
+                title = { Text(tr("Daily time limit", "Kikomo cha muda kwa siku")) },
+                text = {
+                    Column {
+                        Text(
+                            tr("When you pass it, HUGO asks before opening the app. Leave empty for no limit.", "Ukipita kikomo, HUGO itauliza kabla ya kufungua. Acha tupu kama hutaki kikomo."),
+                            fontSize = 13.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            minutes, { v -> minutes = v.filter { it.isDigit() }.take(3) },
+                            singleLine = true, label = { Text(tr("Minutes", "Dakika")) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                        if (!Usage.hasAccess(s.context)) {
+                            Spacer(Modifier.height(8.dp))
+                            TextLink(tr("Allow usage access first", "Ruhusu kuona matumizi kwanza")) { Usage.openSettings(s.context) }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        s.limits.put(app.pkg, minutes.toIntOrNull()?.takeIf { it > 0 }?.toString())
+                        onClose()
+                    }) { Text(tr("Save", "Hifadhi")) }
+                },
+                dismissButton = { TextButton(onClick = onClose) { Text(tr("Cancel", "Ghairi")) } }
+            )
+        }
+        "folder" -> {
+            AlertDialog(
+                onDismissRequest = onClose,
+                title = { Text(tr("Add to folder", "Weka kwenye folda")) },
+                text = {
+                    Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
+                        if (s.folders.value.isEmpty()) Text(tr("No folders yet. Create one on Home.", "Bado hakuna folda. Tengeneza moja Nyumbani."), fontSize = 13.sp)
+                        s.folders.value.forEach { f ->
+                            MenuRow(f.name) {
+                                s.folders.value = s.folders.value.map { if (it.id == f.id && app.key !in it.apps) it.copy(apps = it.apps + app.key) else it }
+                                onClose()
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = onClose) { Text(tr("Close", "Funga")) } }
+            )
+        }
+        else -> {
+            AlertDialog(
+                onDismissRequest = onClose,
+                title = { Text(app.label) },
+                text = {
+                    Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                        MenuRow(if (onHome) tr("Remove from Home", "Ondoa Nyumbani") else tr("Add to Home", "Weka Nyumbani")) {
+                            s.home.value = if (onHome) s.home.value - ("app:" + app.key) else s.home.value + ("app:" + app.key)
+                            onClose()
+                        }
+                        MenuRow(tr("Add to folder", "Weka kwenye folda")) { page = "folder" }
+                        MenuRow(tr("Rename", "Badilisha jina")) { page = "rename" }
+                        MenuRow(tr("Change icon (from gallery)", "Badilisha icon (kutoka picha)")) {
+                            pickIcon.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        }
+                        if (s.customIcons.value.containsKey(app.key)) {
+                            MenuRow(tr("Use original icon", "Rudisha icon ya asili")) { IconCache.resetCustom(s, app); onClose() }
+                        }
+                        MenuRow(if (locked) tr("Remove fingerprint lock", "Ondoa kufuli ya kidole") else tr("Lock with fingerprint", "Funga kwa alama ya kidole")) {
+                            if (locked) AppRepository.unlock(s, app.label) { s.locked.toggle(app.key) } else s.locked.toggle(app.key)
+                            onClose()
+                        }
+                        MenuRow(tr("Daily time limit", "Kikomo cha muda")) { page = "limit" }
+                        MenuRow(if (workHidden) tr("Show in Work mode", "Onyesha wakati wa Kazi") else tr("Hide in Work mode", "Ficha wakati wa Kazi")) {
+                            s.workHidden.toggle(app.pkg)
+                            onClose()
+                        }
+                        MenuRow(tr("Hide app", "Ficha app")) { s.hidden.toggle(app.pkg); onClose() }
+                        MenuRow(tr("App info", "Taarifa za app")) { AppRepository.openInfo(s.context, app.pkg); onClose() }
+                        MenuRow(tr("Uninstall", "Ondoa app")) { AppRepository.uninstall(s.context, app.pkg); onClose() }
+                    }
+                },
+                confirmButton = { TextButton(onClick = onClose) { Text(tr("Close", "Funga")) } }
+            )
+        }
+    }
+}
+
+/** Ask the AI assistant (needs your own Claude API key in Settings). */
+@Composable
+fun AskDialog(question: String, onClose: () -> Unit) {
+    val s = LocalLauncher.current
+    val nav = LocalNav.current
+    var answer by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val hasKey = s.aiKey.value.isNotBlank()
+    LaunchedEffect(question, hasKey) {
+        if (hasKey) {
+            scope.launch {
+                answer = withContext(Dispatchers.IO) { Ai.ask(s.aiKey.value, question) }
+            }
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(question, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                when {
+                    !hasKey -> {
+                        Text(tr("Add your Claude API key in Settings → Assistant to ask questions here.", "Weka API key yako ya Claude kwenye Settings → Assistant ili uulize hapa."), fontSize = 14.sp)
+                        Spacer(Modifier.height(8.dp))
+                        TextLink(tr("Open settings", "Fungua settings")) { onClose(); nav.settings("ai") }
+                    }
+                    answer == null -> Text(tr("Thinking…", "Inafikiri…"), fontSize = 14.sp)
+                    else -> Text(answer ?: "", fontSize = 14.sp, lineHeight = 20.sp)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text(tr("Close", "Funga")) } }
+    )
+}
+

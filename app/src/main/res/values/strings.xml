@@ -2,4 +2,6 @@
 <resources>
     <string name="app_name">HUGO Launcher</string>
     <string name="music_service">HUGO Launcher music controls</string>
+    <string name="lock_service">HUGO Launcher screen lock</string>
+    <string name="lock_desc">Lets HUGO Launcher turn the screen off when you double-tap the home screen. It reads nothing on your screen.</string>
 </resources>
