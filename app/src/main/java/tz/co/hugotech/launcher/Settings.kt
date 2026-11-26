@@ -43,6 +43,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
@@ -143,9 +145,36 @@ private fun MainSettings(onPage: (String) -> Unit) {
         )
         Label(tr("Icons", "Icons"))
         Segmented(
-            listOf("original" to s.tr("Original", "Asili"), "matte" to "Matte", "gems" to s.tr("Gems", "Vito"), "mono" to "Mono"),
+            listOf("ios" to "iOS", "glass" to "Glass", "original" to s.tr("Original", "Asili")),
             s.iconTheme.value
         ) { s.iconTheme.value = it; IconCache.clear(); s.iconVersion.intValue++ }
+        Spacer(Modifier.height(6.dp))
+        Segmented(
+            listOf("matte" to "Matte", "gems" to s.tr("Gems", "Vito"), "mono" to "Mono"),
+            s.iconTheme.value
+        ) { s.iconTheme.value = it; IconCache.clear(); s.iconVersion.intValue++ }
+        if (s.iconTheme.value == "ios") {
+            Label(tr("Icon colour", "Rangi ya icons"))
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TileTones.all.forEach { tt ->
+                    val on = s.tileTone.value == tt.id
+                    Column(
+                        Modifier.clip(RoundedCornerShape(14.dp)).clickable { s.tileTone.value = tt.id }.padding(4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            Modifier
+                                .size(46.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Brush.verticalGradient(listOf(tt.top, tt.bottom)))
+                                .border(if (on) 2.dp else 0.7.dp, if (on) accent().main else Color.White.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(s.tr(tt.en, tt.sw), color = if (on) pal.text else pal.muted, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
         Label(tr("Colour", "Rangi"))
         Segmented(Accents.map { it.id to it.label }, s.accent.value) { s.accent.value = it }
         Label(tr("Wallpaper", "Wallpaper"))

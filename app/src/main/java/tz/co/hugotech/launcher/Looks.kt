@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -91,6 +92,29 @@ fun AppIcon(app: AppInfo?, size: Dp, badge: Int = 0, dimmed: Boolean = false) {
         contentAlignment = Alignment.Center
     ) {
         when (theme) {
+            "ios" -> {
+                // Solid tile like iPhone dark mode, in the colour the user picked
+                val shape = RoundedCornerShape(size * 0.24f)
+                val tt = TileTones.of(s.tileTone.value)
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clip(shape)
+                        .background(Brush.verticalGradient(listOf(tt.top, tt.bottom)))
+                        .border(0.7.dp, Color.White.copy(alpha = if (tt.light) 0.5f else 0.16f), shape)
+                )
+            }
+            "glass" -> {
+                // See-through glass tile with a light edge and a soft shine at the top
+                val shape = RoundedCornerShape(size * 0.24f)
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clip(shape)
+                        .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.24f), Color.White.copy(alpha = 0.07f))))
+                        .border(0.8.dp, Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.55f), Color.White.copy(alpha = 0.12f))), shape)
+                )
+            }
             "gems" -> {
                 Box(Modifier.fillMaxSize().shadow(6.dp, OctagonShape).clip(OctagonShape).background(a.rim))
                 Box(Modifier.fillMaxSize().padding(2.dp).clip(OctagonShape).background(Gems.forPackage(app?.pkg ?: "")))
@@ -130,9 +154,31 @@ fun AppIcon(app: AppInfo?, size: Dp, badge: Int = 0, dimmed: Boolean = false) {
             }
         }
         val inner = if (theme == "original") size else size * 0.6f
+        val darkTile = theme == "ios" || theme == "glass"
+        val lightTile = theme == "ios" && TileTones.of(s.tileTone.value).light
+        val tone = (Color(icons?.tone ?: 0).takeIf { icons?.tone != 0 } ?: Color(0xFFE8E8EA))
+            .let { if (lightTile && it.red + it.green + it.blue > 2.4f) Color(0xFF1C1C1E) else it }
         when {
-            app == null -> Glyph(G.PLUS, size * 0.36f, glyphColor)
+            app == null -> Glyph(G.PLUS, size * 0.36f, if (darkTile) Color(0xFFE8E8EA) else glyphColor)
             icons == null -> Box(Modifier.size(inner * 0.8f).clip(CircleShape).background(pal.text.copy(alpha = 0.06f)))
+            darkTile && !forceTint && icons.mono != null -> Image(
+                bitmap = icons.mono,
+                contentDescription = app.label,
+                modifier = Modifier.size(size * 0.92f),
+                colorFilter = ColorFilter.tint(tone)
+            )
+            darkTile && !forceTint && icons.fg != null -> Image(
+                bitmap = icons.fg,
+                contentDescription = app.label,
+                modifier = Modifier.size(size).clip(RoundedCornerShape(size * 0.24f)),
+                colorFilter = if (icons.fgPlain) ColorFilter.tint(tone, BlendMode.Modulate) else null
+            )
+            darkTile && icons.full != null -> Image(
+                bitmap = icons.full,
+                contentDescription = app.label,
+                modifier = Modifier.size(size * 0.74f).clip(RoundedCornerShape(size * 0.2f)),
+                colorFilter = if (forceTint) tintTo(glyphColor) else null
+            )
             icons.mono != null && forceTint -> Image(
                 bitmap = icons.mono,
                 contentDescription = app.label,
@@ -147,6 +193,16 @@ fun AppIcon(app: AppInfo?, size: Dp, badge: Int = 0, dimmed: Boolean = false) {
                     .clip(RoundedCornerShape(if (theme == "original") size * 0.24f else size * 0.18f)),
                 colorFilter = if (forceTint && theme != "original") tintTo(glyphColor) else null
             )
+            // Icon could not be read: show the first letter of the app name
+            else -> Box(
+                Modifier.size(inner).clip(RoundedCornerShape(size * 0.24f)).background(a.main.copy(alpha = 0.22f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    app.label.take(1).uppercase(), color = pal.text,
+                    fontSize = (size.value * 0.38f).sp, fontWeight = FontWeight.Medium
+                )
+            }
         }
         if (badge > 0) {
             Box(
@@ -163,6 +219,24 @@ fun AppIcon(app: AppInfo?, size: Dp, badge: Int = 0, dimmed: Boolean = false) {
             }
         }
     }
+}
+
+/* -------------------------------- Tile colours ------------------------------ */
+
+class TileTone(val id: String, val sw: String, val en: String, val top: Color, val bottom: Color, val light: Boolean = false)
+
+object TileTones {
+    val all = listOf(
+        TileTone("black", "Nyeusi", "Black", Color(0xFF3A3A3D), Color(0xFF151517)),
+        TileTone("graphite", "Kijivu", "Graphite", Color(0xFF5A5B60), Color(0xFF2A2B2F)),
+        TileTone("navy", "Bluu", "Navy", Color(0xFF26416E), Color(0xFF0E1B33)),
+        TileTone("wine", "Mvinyo", "Wine", Color(0xFF5E2131), Color(0xFF2A0E15)),
+        TileTone("forest", "Kijani", "Forest", Color(0xFF24503B), Color(0xFF0E2419)),
+        TileTone("gold", "Gold", "Gold", Color(0xFF6E5E3C), Color(0xFF2E2616)),
+        TileTone("purple", "Zambarau", "Purple", Color(0xFF4B2A6E), Color(0xFF1C0F2B)),
+        TileTone("white", "Nyeupe", "White", Color(0xFFF7F7F9), Color(0xFFDCDCE1), light = true)
+    )
+    fun of(id: String) = all.firstOrNull { it.id == id } ?: all[0]
 }
 
 /* -------------------------------- Wallpapers -------------------------------- */

@@ -262,7 +262,18 @@ object IconPacks {
 
 /* ------------------------------- Icon cache ------------------------------- */
 
-class AppIcons(val full: ImageBitmap?, val mono: ImageBitmap?)
+/**
+ * full: the normal icon. mono: one-colour glyph (Android 13+ apps).
+ * fg: the logo layer without its background. tone: the app's main colour.
+ * fgPlain: the logo layer is white/grey, so it gets painted in the app's colour.
+ */
+class AppIcons(
+    val full: ImageBitmap?,
+    val mono: ImageBitmap?,
+    val fg: ImageBitmap? = null,
+    val tone: Int = 0,
+    val fgPlain: Boolean = false
+)
 
 object IconCache {
     private const val SIZE = 144
@@ -290,16 +301,106 @@ object IconCache {
                     AppIcons(d.toBitmap(SIZE, SIZE).asImageBitmap(), null)
                 }
                 else -> {
-                    val d = ctx.packageManager.getActivityIcon(ComponentName(app.pkg, app.activity))
-                    val needMono = s.iconTheme.value == "mono" || s.uniformIcons.value
-                    AppIcons(d.toBitmap(SIZE, SIZE).asImageBitmap(), if (needMono) monochrome(d) else null)
+                    val d = systemIcon(ctx, app) ?: return AppIcons(null, null)   // not cached: try again later
+                    val theme = s.iconTheme.value
+                    val dark = theme == "ios" || theme == "glass"
+                    val needMono = theme == "mono" || dark || s.uniformIcons.value
+                    val fullBmp = d.toBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
+                    if (dark) {
+                        val fgBmp = foreground(d)
+                        AppIcons(
+                            full = fullBmp.asImageBitmap(),
+                            mono = monochrome(d),
+                            fg = fgBmp?.asImageBitmap(),
+                            tone = mainColour(fullBmp),
+                            fgPlain = fgBmp != null && isPlain(fgBmp)
+                        )
+                    } else {
+                        AppIcons(fullBmp.asImageBitmap(), if (needMono) monochrome(d) else null)
+                    }
                 }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             AppIcons(null, null)
         }
-        cache.put(app.key, result)
+        if (result.full != null) cache.put(app.key, result)
         return result
+    }
+
+    /**
+     * The app's own icon. Tries the launcher service first (handles every kind of app),
+     * then the activity, then the app itself.
+     */
+    private fun systemIcon(ctx: Context, app: AppInfo): Drawable? {
+        try {
+            val la = ctx.getSystemService(android.content.pm.LauncherApps::class.java)
+            la?.getActivityList(app.pkg, android.os.Process.myUserHandle())
+                ?.let { list -> list.firstOrNull { it.componentName.className == app.activity } ?: list.firstOrNull() }
+                ?.getIcon(android.util.DisplayMetrics.DENSITY_XXHIGH)
+                ?.let { return it }
+        } catch (e: Throwable) { }
+        try { return ctx.packageManager.getActivityIcon(ComponentName(app.pkg, app.activity)) } catch (e: Throwable) { }
+        try { return ctx.packageManager.getApplicationIcon(app.pkg) } catch (e: Throwable) { }
+        return null
+    }
+
+    /** The logo layer of an adaptive icon, drawn the same size as the full icon. */
+    private fun foreground(d: Drawable): Bitmap? {
+        if (d !is AdaptiveIconDrawable) return null
+        val f = d.foreground ?: return null
+        val bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
+        val pad = (SIZE * 0.25f).toInt()
+        f.setBounds(-pad, -pad, SIZE + pad, SIZE + pad)
+        f.draw(Canvas(bmp))
+        return bmp
+    }
+
+    /** The strongest colour in an icon (the WhatsApp green, the YouTube red…). */
+    private fun mainColour(b: Bitmap): Int {
+        var r = 0L; var g = 0L; var bl = 0L; var n = 0L
+        val hsv = FloatArray(3)
+        var y = 0
+        while (y < b.height) {
+            var x = 0
+            while (x < b.width) {
+                val c = b.getPixel(x, y)
+                if (android.graphics.Color.alpha(c) > 200) {
+                    android.graphics.Color.colorToHSV(c, hsv)
+                    if (hsv[1] > 0.35f && hsv[2] > 0.3f) {
+                        r += android.graphics.Color.red(c); g += android.graphics.Color.green(c); bl += android.graphics.Color.blue(c); n++
+                    }
+                }
+                x += 4
+            }
+            y += 4
+        }
+        if (n == 0L) return 0xFFE8E8EA.toInt()
+        val c = android.graphics.Color.rgb((r / n).toInt(), (g / n).toInt(), (bl / n).toInt())
+        // Make sure it shows up on a dark tile
+        android.graphics.Color.colorToHSV(c, hsv)
+        hsv[2] = hsv[2].coerceAtLeast(0.75f)
+        return android.graphics.Color.HSVToColor(hsv)
+    }
+
+    /** True when a layer is only white or grey. */
+    private fun isPlain(b: Bitmap): Boolean {
+        val hsv = FloatArray(3)
+        var colour = 0; var seen = 0
+        var y = 0
+        while (y < b.height) {
+            var x = 0
+            while (x < b.width) {
+                val c = b.getPixel(x, y)
+                if (android.graphics.Color.alpha(c) > 160) {
+                    seen++
+                    android.graphics.Color.colorToHSV(c, hsv)
+                    if (hsv[1] > 0.25f) colour++
+                }
+                x += 4
+            }
+            y += 4
+        }
+        return seen > 0 && colour * 10 < seen
     }
 
     private fun monochrome(d: Drawable): ImageBitmap? {

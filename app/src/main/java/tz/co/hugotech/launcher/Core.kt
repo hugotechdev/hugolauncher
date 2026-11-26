@@ -153,12 +153,13 @@ class LauncherState(val context: Context) {
 
     init {
         // v2.2: real app icons in their own colours by default
-        if (sp.getInt("look_v", 0) < 22) sp.edit().putString("icon_theme", "original").putInt("look_v", 22).apply()
+        if (sp.getInt("look_v", 0) < 23) sp.edit().putString("icon_theme", "ios").putInt("look_v", 23).apply()
     }
 
     // Look
     val homeStyle = StrPref(sp, "home_style", "classic")      // classic | matte | mono
-    val iconTheme = StrPref(sp, "icon_theme", "original")      // original | matte | gems | mono
+    val iconTheme = StrPref(sp, "icon_theme", "ios")           // ios | glass | original | matte | gems | mono
+    val tileTone = StrPref(sp, "tile_tone", "black")           // colour of the iOS tiles
     val homeSeeded = BoolPref(sp, "home_seeded", false)
     val accent = StrPref(sp, "accent", "gold")                 // gold | silver | rose | red
     val wallpaper = StrPref(sp, "wallpaper", "spiral")         // spiral | galaxy | atom | dawn | dna | cross | plain | custom

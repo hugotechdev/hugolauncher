@@ -427,6 +427,7 @@ fun MonoHome() {
                     }
                 }
                 QuickToggles(dark = false)
+                HomeGrid()
                 DockRow()
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 18.dp),
@@ -617,6 +618,7 @@ fun HomeGrid() {
     var menuFor by remember { mutableStateOf<String?>(null) }
     var openFolder by remember { mutableStateOf<String?>(null) }
     var editFolder by remember { mutableStateOf<Folder?>(null) }
+    var picking by remember { mutableStateOf(false) }
     var dragIdx by remember { mutableIntStateOf(-1) }
     var drag by remember { mutableStateOf(Offset.Zero) }
     var cellW by remember { mutableFloatStateOf(1f) }
@@ -637,6 +639,8 @@ fun HomeGrid() {
             if (arranging) {
                 TextLink(tr("Done", "Imekamilika")) { arranging = false }
             } else {
+                TextLink(tr("Add apps", "Ongeza apps")) { picking = true }
+                Spacer(Modifier.width(10.dp))
                 TextLink(tr("New folder", "Folda mpya")) { editFolder = Folder("f" + System.currentTimeMillis(), "", emptyList()) }
                 if (items.size > 1) {
                     Spacer(Modifier.width(10.dp))
@@ -652,14 +656,21 @@ fun HomeGrid() {
             )
         }
         if (arranging) {
-            Text(tr("Drag an icon to its new place.", "Buruta icon kwenda mahali pake mpya."), color = pal.muted, fontSize = 12.sp)
+            Text(tr("Drag an icon to move it. Tap × to remove it.", "Buruta icon kuihamisha. Gusa × kuiondoa."), color = pal.muted, fontSize = 12.sp)
             Spacer(Modifier.height(8.dp))
         }
-        items.chunked(cols).forEachIndexed { r, row ->
+        val shown = if (arranging) items else items + "add"
+        shown.chunked(cols).forEachIndexed { r, row ->
             Row(Modifier.fillMaxWidth().padding(bottom = 14.dp)) {
                 row.forEachIndexed { c, item ->
                     val idx = r * cols + c
                     val dragging = idx == dragIdx
+                    if (item == "add") {
+                        Box(
+                            Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).clickable { picking = true },
+                            contentAlignment = Alignment.TopCenter
+                        ) { Labeled(tr("Add", "Ongeza")) { AppIcon(null, 56.dp) } }
+                    } else
                     Box(
                         Modifier
                             .weight(1f)
@@ -716,6 +727,18 @@ fun HomeGrid() {
                         } else {
                             val app = s.appByKey(item.removePrefix("app:"))
                             if (app != null) Labeled(app.label) { AppIcon(app, 56.dp, badge = badges[app.pkg] ?: 0) }
+                        }
+                        if (arranging) {
+                            Box(
+                                Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(end = 6.dp)
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .background(pal.text)
+                                    .clickable { s.home.value = s.home.value - item },
+                                contentAlignment = Alignment.Center
+                            ) { Glyph("M7 7l10 10 M17 7L7 17", 14.dp, pal.bg) }
                         }
                     }
                 }
@@ -781,6 +804,69 @@ fun HomeGrid() {
     }
 
     editFolder?.let { f -> FolderEditor(f) { editFolder = null } }
+    if (picking) HomeAppsPicker { picking = false }
+}
+
+/** Pick which apps sit on Home: tap to add, tap again to remove. */
+@Composable
+fun HomeAppsPicker(onClose: () -> Unit) {
+    val s = LocalLauncher.current
+    val pal = LocalPal.current
+    val a = accent()
+    var q by remember { mutableStateOf("") }
+    val apps = s.visibleApps().filter { q.isBlank() || it.label.contains(q.trim(), true) }
+    val home = s.home.value
+    androidx.compose.ui.window.Dialog(onDismissRequest = onClose) {
+        Column(
+            Modifier.fillMaxWidth().height(540.dp).clip(RoundedCornerShape(24.dp)).background(pal.cardSolid).padding(16.dp)
+        ) {
+            Text(tr("Home apps", "Apps za Nyumbani"), color = pal.text, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+            Text(
+                tr("Tap to add. Tap again to remove.", "Gusa kuongeza. Gusa tena kuondoa.") + "  " +
+                    home.count { it.startsWith("app:") } + " " + tr("on Home", "Nyumbani"),
+                color = pal.muted, fontSize = 12.sp
+            )
+            Spacer(Modifier.height(10.dp))
+            Box(
+                Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(22.dp)).background(pal.bg)
+                    .border(1.dp, pal.border, RoundedCornerShape(22.dp)).padding(horizontal = 14.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                if (q.isEmpty()) Text(tr("Search apps", "Tafuta apps"), color = pal.dim, fontSize = 14.sp)
+                androidx.compose.foundation.text.BasicTextField(
+                    q, { q = it }, singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(color = pal.text, fontSize = 14.sp),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(a.main),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f)) {
+                items(apps.size, key = { apps[it].key }) { i ->
+                    val app = apps[i]
+                    val on = ("app:" + app.key) in home
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { s.home.value = if (on) s.home.value - ("app:" + app.key) else s.home.value + ("app:" + app.key) }
+                            .padding(vertical = 6.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AppIcon(app, 40.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Text(app.label, color = pal.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Box(
+                            Modifier.size(28.dp).clip(CircleShape).background(if (on) a.main else pal.bg)
+                                .border(1.dp, if (on) a.main else pal.border, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) { Glyph(if (on) G.CHECK else G.PLUS, 14.dp, if (on) pal.bg else pal.muted) }
+                    }
+                }
+            }
+            TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End)) { Text(tr("Done", "Tayari")) }
+        }
+    }
 }
 
 @Composable
