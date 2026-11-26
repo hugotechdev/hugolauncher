@@ -143,9 +143,9 @@ private fun MainSettings(onPage: (String) -> Unit) {
         )
         Label(tr("Icons", "Icons"))
         Segmented(
-            listOf("gems" to s.tr("Gems", "Vito"), "matte" to "Matte", "mono" to "Mono", "original" to s.tr("Original", "Asili")),
+            listOf("original" to s.tr("Original", "Asili"), "matte" to "Matte", "gems" to s.tr("Gems", "Vito"), "mono" to "Mono"),
             s.iconTheme.value
-        ) { s.iconTheme.value = it }
+        ) { s.iconTheme.value = it; IconCache.clear(); s.iconVersion.intValue++ }
         Label(tr("Colour", "Rangi"))
         Segmented(Accents.map { it.id to it.label }, s.accent.value) { s.accent.value = it }
         Label(tr("Wallpaper", "Wallpaper"))
@@ -160,7 +160,7 @@ private fun MainSettings(onPage: (String) -> Unit) {
         Label(tr("Columns", "Safu"))
         Segmented(listOf("4" to "4", "5" to "5"), s.columns.value.toString()) { s.columns.value = it.toInt() }
         SettingToggle(tr("Show app names", "Onyesha majina ya apps"), null, s.showLabels.value) { s.showLabels.value = it }
-        SettingToggle(tr("One-colour icons", "Icons za rangi moja"), tr("Paint every icon in the chosen colour.", "Paka kila icon rangi uliyochagua."), s.uniformIcons.value) { s.uniformIcons.value = it }
+        SettingToggle(tr("One-colour icons", "Icons za rangi moja"), tr("Paint every icon in the chosen colour.", "Paka kila icon rangi uliyochagua."), s.uniformIcons.value) { s.uniformIcons.value = it; IconCache.clear(); s.iconVersion.intValue++ }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(tr("Icon pack", "Icon pack"), color = pal.text, fontSize = 15.sp)
@@ -281,7 +281,7 @@ private fun MainSettings(onPage: (String) -> Unit) {
         }
     }
 
-    Text("HUGO Launcher 2.1 · HUGO TECH", color = pal.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+    Text("HUGO Launcher 2.2 · HUGO TECH", color = pal.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
 
     if (choosingWork) {
         var chosen by remember { mutableStateOf(s.workHidden.value.ifEmpty { s.apps.value.map { it.pkg }.filter { isSocial(it) }.toSet() }) }

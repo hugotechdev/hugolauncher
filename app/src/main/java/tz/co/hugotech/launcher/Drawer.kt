@@ -56,9 +56,40 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.Dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** Soft fade at the top and bottom of a scrolling list, so items don't look cut off. */
+fun Modifier.fadeEdges(top: Dp = 28.dp, bottom: Dp = 28.dp): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val h = size.height
+        if (h <= 0f) return@drawWithContent
+        val t = (top.toPx() / h).coerceIn(0f, 0.5f)
+        val b = (bottom.toPx() / h).coerceIn(0f, 0.5f)
+        drawRect(
+            Brush.verticalGradient(0f to Color.Transparent, t to Color.Black, 1f - b to Color.Black, 1f to Color.Transparent),
+            blendMode = BlendMode.DstIn
+        )
+    }
 
 private sealed class Cell {
     data class Header(val title: String) : Cell()
@@ -156,14 +187,34 @@ fun DrawerScreen(focusSearch: Boolean, onClose: () -> Unit) {
             }
         }
 
+        val grid = rememberLazyGridState()
+        val scope = rememberCoroutineScope()
+        // A–Z rail: first position of each letter among the apps
+        val letters = remember(cells) {
+            val m = LinkedHashMap<Char, Int>()
+            cells.forEachIndexed { i, c ->
+                if (c is Cell.App && !c.rare) {
+                    val ch = c.app.label.firstOrNull()?.uppercaseChar()?.let { if (it.isLetter()) it else '#' } ?: '#'
+                    if (ch !in m) m[ch] = i
+                }
+            }
+            m
+        }
+        var scrub by remember { mutableStateOf<Char?>(null) }
+
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+        Box(Modifier.weight(1f).fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(s.columns.value),
-            contentPadding = PaddingValues(top = 18.dp, bottom = 32.dp),
+            state = grid,
+            contentPadding = PaddingValues(top = 22.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.fillMaxSize().fadeEdges()
         ) {
             items(
                 count = cells.size,
+                key = { i -> when (val c = cells[i]) { is Cell.Header -> "h:" + c.title; is Cell.App -> c.app.key } },
+                contentType = { i -> if (cells[i] is Cell.Header) 0 else 1 },
                 span = { i -> if (cells[i] is Cell.Header) GridItemSpan(maxLineSpan) else GridItemSpan(1) }
             ) { i ->
                 when (val c = cells[i]) {
@@ -180,6 +231,51 @@ fun DrawerScreen(focusSearch: Boolean, onClose: () -> Unit) {
                 }
             }
         }
+        scrub?.let { ch ->
+            Box(
+                Modifier.align(Alignment.Center).size(72.dp).clip(RoundedCornerShape(22.dp)).background(pal.cardSolid)
+                    .border(1.dp, pal.border, RoundedCornerShape(22.dp)),
+                contentAlignment = Alignment.Center
+            ) { Text(ch.toString(), color = a.main, fontSize = 32.sp, fontWeight = FontWeight.Light) }
+        }
+        }
+        if (query.isBlank() && letters.size > 4) {
+            val keys = letters.keys.toList()
+            Column(
+                Modifier
+                    .width(20.dp)
+                    .fillMaxHeight()
+                    .padding(vertical = 22.dp)
+                    .pointerInput(keys) {
+                        fun pick(y: Float) {
+                            val idx = (y / size.height * keys.size).toInt().coerceIn(0, keys.size - 1)
+                            val ch = keys[idx]
+                            if (scrub != ch) {
+                                scrub = ch
+                                scope.launch { grid.scrollToItem(letters[ch] ?: 0) }
+                            }
+                        }
+                        detectVerticalDragGestures(
+                            onDragStart = { pick(it.y) },
+                            onDragEnd = { scrub = null },
+                            onDragCancel = { scrub = null }
+                        ) { change, _ -> pick(change.position.y) }
+                    }
+                    .pointerInput(keys) {
+                        detectTapGestures { pos ->
+                            val ch = keys[(pos.y / size.height * keys.size).toInt().coerceIn(0, keys.size - 1)]
+                            scope.launch { grid.animateScrollToItem(letters[ch] ?: 0) }
+                        }
+                    },
+                verticalArrangement = Arrangement.SpaceEvenly,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                keys.forEach { ch ->
+                    Text(ch.toString(), color = if (ch == scrub) a.main else pal.dim, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+        }
     }
 
     menu?.let { app -> AppMenu(app) { menu = null } }
@@ -190,9 +286,19 @@ fun DrawerScreen(focusSearch: Boolean, onClose: () -> Unit) {
 private fun DrawerItem(app: AppInfo, badge: Int, dimmed: Boolean, onMenu: () -> Unit) {
     val s = LocalLauncher.current
     val pal = LocalPal.current
+    // Each icon rises in softly as it scrolls into view.
+    val appear = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { appear.animateTo(1f, tween(280, easing = FastOutSlowInEasing)) }
     Column(
         Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                val v = appear.value
+                alpha = v
+                scaleX = 0.86f + 0.14f * v
+                scaleY = 0.86f + 0.14f * v
+                translationY = (1f - v) * 18.dp.toPx()
+            }
             .clip(RoundedCornerShape(14.dp))
             .combinedClickable(onClick = { AppRepository.open(s, app) }, onLongClick = onMenu)
             .padding(vertical = 4.dp),

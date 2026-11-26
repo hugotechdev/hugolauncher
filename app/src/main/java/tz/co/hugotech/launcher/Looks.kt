@@ -133,7 +133,7 @@ fun AppIcon(app: AppInfo?, size: Dp, badge: Int = 0, dimmed: Boolean = false) {
         when {
             app == null -> Glyph(G.PLUS, size * 0.36f, glyphColor)
             icons == null -> Box(Modifier.size(inner * 0.8f).clip(CircleShape).background(pal.text.copy(alpha = 0.06f)))
-            icons.mono != null && theme != "original" -> Image(
+            icons.mono != null && forceTint -> Image(
                 bitmap = icons.mono,
                 contentDescription = app.label,
                 modifier = Modifier.size(inner),
@@ -143,8 +143,8 @@ fun AppIcon(app: AppInfo?, size: Dp, badge: Int = 0, dimmed: Boolean = false) {
                 bitmap = icons.full,
                 contentDescription = app.label,
                 modifier = Modifier
-                    .size(if (theme == "original") size else inner * 0.92f)
-                    .clip(RoundedCornerShape(size * 0.2f)),
+                    .size(if (theme == "original") size else inner * 1.12f)
+                    .clip(RoundedCornerShape(if (theme == "original") size * 0.24f else size * 0.18f)),
                 colorFilter = if (forceTint && theme != "original") tintTo(glyphColor) else null
             )
         }

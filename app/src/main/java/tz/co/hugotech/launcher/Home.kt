@@ -623,6 +623,13 @@ fun HomeGrid() {
     var cellH by remember { mutableFloatStateOf(1f) }
     val badges = NotificationState.counts.value
     val gapPx = with(LocalDensity.current) { 14.dp.toPx() }
+    val ctx = LocalContext.current
+    LaunchedEffect(s.apps.value.size) {
+        if (!s.homeSeeded.value && s.home.value.isEmpty() && s.apps.value.isNotEmpty()) {
+            s.home.value = AppRepository.starterHome(ctx, s).map { "app:$it" }
+            s.homeSeeded.value = true
+        }
+    }
 
     Column(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -892,6 +899,7 @@ fun TodayPage() {
         Spacer(Modifier.height(14.dp))
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             DayNoteCard()
+            VerseCard()
             WeatherCard()
             key(calendarAsked) { EventsCard { askCalendar.launch(Manifest.permission.READ_CALENDAR) } }
             ScreenTimeCard { if (Usage.hasAccess(ctx)) nav.settings("screen") else Usage.openSettings(ctx) }

@@ -157,6 +157,34 @@ object AppRepository {
         return if (pkg == "android") null else pkg
     }
 
+    /** First Home screen: most-used apps, else common ones, never the dock apps. */
+    fun starterHome(context: Context, s: LauncherState): List<String> {
+        val apps = s.visibleApps()
+        val dockPkgs = s.dock.value.mapNotNull { k -> apps.firstOrNull { it.key == k }?.pkg }.toSet() +
+            defaultDockPackages(context).toSet()
+        val used = try {
+            Usage.todayMinutes(context).entries.sortedByDescending { it.value }.map { it.key }
+        } catch (e: Throwable) { emptyList() }
+        val common = listOf(
+            "com.whatsapp", "com.whatsapp.w4b", "com.google.android.youtube", "com.instagram.android",
+            "com.facebook.katana", "com.google.android.gm", "com.android.chrome", "com.google.android.apps.maps",
+            "com.sec.android.gallery3d", "com.google.android.apps.photos", "com.android.vending",
+            "com.google.android.calendar", "com.samsung.android.calendar", "com.android.settings",
+            "tz.co.hugotech.mix", "com.audiomack", "com.spotify.music"
+        )
+        val out = ArrayList<String>()
+        for (p in used + common) {
+            if (out.size >= 8) break
+            if (p in dockPkgs) continue
+            apps.firstOrNull { it.pkg == p }?.let { if (it.key !in out) out += it.key }
+        }
+        for (a in apps) {
+            if (out.size >= 8) break
+            if (a.pkg !in dockPkgs && a.key !in out) out += a.key
+        }
+        return out
+    }
+
     /** Phone, messages, camera, browser — the phone's own defaults. */
     fun defaultDockPackages(context: Context): List<String> = listOfNotNull(
         defaultPackage(context, Intent(Intent.ACTION_DIAL)),
@@ -237,8 +265,12 @@ object IconPacks {
 class AppIcons(val full: ImageBitmap?, val mono: ImageBitmap?)
 
 object IconCache {
-    private const val SIZE = 112
-    private val cache = LruCache<String, AppIcons>(500)
+    private const val SIZE = 144
+    // About 24 MB of icons at most
+    private val cache = object : LruCache<String, AppIcons>(24 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: AppIcons): Int =
+            (value.full?.let { it.width * it.height * 4 } ?: 0) + (value.mono?.let { it.width * it.height * 4 } ?: 0) + 64
+    }
 
     fun peek(key: String): AppIcons? = cache.get(key)
 
@@ -259,7 +291,8 @@ object IconCache {
                 }
                 else -> {
                     val d = ctx.packageManager.getActivityIcon(ComponentName(app.pkg, app.activity))
-                    AppIcons(d.toBitmap(SIZE, SIZE).asImageBitmap(), monochrome(d))
+                    val needMono = s.iconTheme.value == "mono" || s.uniformIcons.value
+                    AppIcons(d.toBitmap(SIZE, SIZE).asImageBitmap(), if (needMono) monochrome(d) else null)
                 }
             }
         } catch (e: Exception) {

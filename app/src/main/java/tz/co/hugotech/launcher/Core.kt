@@ -151,9 +151,15 @@ class LauncherState(val context: Context) {
     val sp: SharedPreferences = context.getSharedPreferences("hugo", Context.MODE_PRIVATE)
     lateinit var activity: FragmentActivity
 
+    init {
+        // v2.2: real app icons in their own colours by default
+        if (sp.getInt("look_v", 0) < 22) sp.edit().putString("icon_theme", "original").putInt("look_v", 22).apply()
+    }
+
     // Look
     val homeStyle = StrPref(sp, "home_style", "classic")      // classic | matte | mono
-    val iconTheme = StrPref(sp, "icon_theme", "matte")         // gems | matte | mono | original
+    val iconTheme = StrPref(sp, "icon_theme", "original")      // original | matte | gems | mono
+    val homeSeeded = BoolPref(sp, "home_seeded", false)
     val accent = StrPref(sp, "accent", "gold")                 // gold | silver | rose | red
     val wallpaper = StrPref(sp, "wallpaper", "spiral")         // spiral | galaxy | atom | dawn | dna | cross | plain | custom
     val uniformIcons = BoolPref(sp, "uniform_icons", false)
